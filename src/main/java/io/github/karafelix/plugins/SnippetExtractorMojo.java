@@ -11,6 +11,7 @@ import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Scanner;
+import java.util.TreeMap;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 
@@ -48,6 +49,7 @@ public class SnippetExtractorMojo extends AbstractMojo
         dirList.addFirst(src);
         File cur;
 
+        /* get list of files from directories */
         while (!dirList.isEmpty())
         {
             cur = dirList.pollFirst();
@@ -70,6 +72,7 @@ public class SnippetExtractorMojo extends AbstractMojo
         String line;
         OutputTracker tracker = new OutputTracker();
 
+        /* read in files */
         for (File file : fileList)
         {
             try
@@ -113,35 +116,80 @@ public class SnippetExtractorMojo extends AbstractMojo
 
     private class OutputTracker
     {
-        private HashMap<String, LinkedList<String>> files;
-        private LinkedList<String> curfiles;
+        private final class PriorityFile
+        {
+            private String filename;
+            private int priority;
+
+            public PriorityFile(String filename, int priority)
+            {
+                this.filename = filename;
+                this.priority = priority;
+            }
+
+            public PriorityFile(String filename)
+            {
+                this(filename, 0);
+            }
+
+            public String getFilename()
+            {
+                return filename;
+            }
+
+            public int getPriority()
+            {
+                return priority;
+            }
+
+            public boolean equals(Object o)
+            {
+                if (!(o instanceof PriorityFile))
+                    return false;
+                PriorityFile pf = (PriorityFile)o;
+                if (filename == null)
+                    return pf.filename == null;
+                else
+                    return filename.equals(pf.filename);
+            }
+        }
+
+        private HashMap<String, TreeMap<Integer, LinkedList<String>>> files;
+        private LinkedList<PriorityFile> curfiles;
 
         public OutputTracker()
         {
-            files = new HashMap<String, LinkedList<String>>();
-            curfiles = new LinkedList<String>();
+            files = new HashMap<String, TreeMap<Integer, LinkedList<String>>>();
+            curfiles = new LinkedList<PriorityFile>();
         }
 
         public void addLine(String line)
         {
-            for (String file : curfiles)
+            String file;
+            int priority;
+            for (PriorityFile pf : curfiles)
             {
-                files.get(file).add(line);
+                file = pf.getFilename();
+                priority = pf.getPriority();
+                files.get(file).get(priority).add(line);
             }
         }
 
         public void startCapture(String filename, int priority)
         {
-            if (curfiles.contains(filename))
+            PriorityFile pf = new PriorityFile(filename, priority);
+            if (curfiles.contains(pf))
             {
                 getLog().warn(String.format("already capturing to %s", filename));
             }
             else
             {
                 getLog().debug(String.format("starting capture to %s, priority %d", filename, priority));
-                curfiles.add(filename);
+                curfiles.add(pf);
                 if (!files.containsKey(filename))
-                    files.put(filename, new LinkedList<String>());
+                    files.put(filename, new TreeMap<Integer, LinkedList<String>>());
+                if (!files.get(filename).containsKey(priority))
+                    files.get(filename).put(priority, new LinkedList<String>());
             }
         }
 
@@ -155,7 +203,8 @@ public class SnippetExtractorMojo extends AbstractMojo
 
         public void endCapture(String filename)
         {
-            if (curfiles.remove(filename))
+            PriorityFile pf = new PriorityFile(filename);
+            if (curfiles.remove(pf))
             {
                 getLog().debug(String.format("ended capture to %s", filename));
             }
@@ -196,22 +245,25 @@ public class SnippetExtractorMojo extends AbstractMojo
         {
             if (!curfiles.isEmpty())
             {
-                for (String file : curfiles)
-                    getLog().warn(String.format("unclosed capture: %s", file));
+                for (PriorityFile pf : curfiles)
+                    getLog().warn(String.format("unclosed capture: %s", pf.getFilename()));
                 curfiles.clear();
             }
         }
 
         public void writeOutputs(File dir)
         {
+            TreeMap<Integer, LinkedList<String>> cur;
             for (String filename : files.keySet())
             {
+                cur = files.get(filename);
                 File file = new File(dir, filename);
                 try (PrintWriter pw = new PrintWriter(file))
                 {
                     getLog().debug(String.format("writing output to %s", filename));
-                    for (String line : files.get(filename))
-                        pw.println(line);
+                    for (int priority : cur.navigableKeySet())
+                        for (String line : cur.get(priority))
+                            pw.println(line);
                 }
                 catch (IOException e)
                 {
