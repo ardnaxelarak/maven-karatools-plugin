@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Scanner;
@@ -40,6 +41,22 @@ public class SnippetExtractorMojo extends AbstractMojo
      *      default-value="${project.build.directory}"
      */
     private File destDirectory;
+
+    /**
+     * Number of spaces to replace tabs with.
+     * @parameter
+     *      experssion="${karatools.tabWidth}"
+     *      default-value=4
+     */
+    private int tabWidth;
+
+    /**
+     * Remove maximal leading spaces?
+     * @parameter
+     *      experssion="${extract.trimSpaces}"
+     *      default-value=true
+     */
+    private boolean trimSpaces;
 
     public void execute() throws MojoExecutionException, MojoFailureException
     {
@@ -156,22 +173,55 @@ public class SnippetExtractorMojo extends AbstractMojo
 
         private HashMap<String, TreeMap<Integer, LinkedList<String>>> files;
         private LinkedList<PriorityFile> curfiles;
+        private HashMap<String, Integer> trimlens;
+        private final Pattern tabPat = Pattern.compile("\t");
+        private final String tabStr;
 
         public OutputTracker()
         {
             files = new HashMap<String, TreeMap<Integer, LinkedList<String>>>();
+            trimlens = new HashMap<String, Integer>();
             curfiles = new LinkedList<PriorityFile>();
+            char[] spaces = new char[tabWidth];
+            Arrays.fill(spaces, ' ');
+            tabStr = new String(spaces);
+        }
+
+        private String processLine(String line)
+        {
+            return tabPat.matcher(line).replaceAll(tabStr);
+        }
+
+        private int countSpaces(String line)
+        {
+            String trim = line.trim();
+            if (!"".equals(trim))
+                return line.indexOf(trim);
+            else
+                return Integer.MAX_VALUE;
+        }
+
+        private void updateCount(int spaces, String file)
+        {
+            if (trimlens.get(file) > spaces)
+            {
+                trimlens.put(file, spaces);
+                getLog().debug(String.format("Updating trim width of %s to %d", file, spaces));
+            }
         }
 
         public void addLine(String line)
         {
             String file;
             int priority;
+            String newline = processLine(line);
+            int count = countSpaces(newline);
             for (PriorityFile pf : curfiles)
             {
                 file = pf.getFilename();
                 priority = pf.getPriority();
-                files.get(file).get(priority).add(line);
+                updateCount(count, file);
+                files.get(file).get(priority).add(newline);
             }
         }
 
@@ -186,6 +236,10 @@ public class SnippetExtractorMojo extends AbstractMojo
             {
                 getLog().debug(String.format("starting capture to %s, priority %d", filename, priority));
                 curfiles.add(pf);
+
+                if (!trimlens.containsKey(filename))
+                    trimlens.put(filename, Integer.MAX_VALUE);
+
                 if (!files.containsKey(filename))
                     files.put(filename, new TreeMap<Integer, LinkedList<String>>());
                 if (!files.get(filename).containsKey(priority))
@@ -251,9 +305,19 @@ public class SnippetExtractorMojo extends AbstractMojo
             }
         }
 
+        private String trimLine(String line, int trim)
+        {
+            if (line.length() <= trim)
+                return "";
+            else
+                return line.substring(trim);
+        }
+
         public void writeOutputs(File dir)
         {
             TreeMap<Integer, LinkedList<String>> cur;
+            int trimwidth = 0;
+
             for (String filename : files.keySet())
             {
                 cur = files.get(filename);
@@ -261,9 +325,13 @@ public class SnippetExtractorMojo extends AbstractMojo
                 try (PrintWriter pw = new PrintWriter(file))
                 {
                     getLog().debug(String.format("writing output to %s", filename));
+
+                    if (trimSpaces)
+                        trimwidth = trimlens.get(filename);
+
                     for (int priority : cur.navigableKeySet())
                         for (String line : cur.get(priority))
-                            pw.println(line);
+                            pw.println(trimLine(line, trimwidth));
                 }
                 catch (IOException e)
                 {
