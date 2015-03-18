@@ -7,6 +7,7 @@ import org.apache.maven.plugin.MojoFailureException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Scanner;
 import java.util.regex.MatchResult;
@@ -40,15 +41,6 @@ public class SnippetExtractorMojo extends AbstractMojo
 
     public void execute() throws MojoExecutionException, MojoFailureException
     {
-        /*
-        File dest = destDirectory;
-
-        if (!f.exists())
-        {
-            f.mkdirs();
-        }
-        */
-
         File src = srcDirectory;
         LinkedList<File> dirList = new LinkedList<File>();
         LinkedList<File> fileList = new LinkedList<File>();
@@ -75,6 +67,7 @@ public class SnippetExtractorMojo extends AbstractMojo
         boolean ignore = false;
         int priority;
         String line;
+        OutputTracker tracker = new OutputTracker();
 
         for (File file : fileList)
         {
@@ -89,33 +82,33 @@ public class SnippetExtractorMojo extends AbstractMojo
                         ignore = true;
                         MatchResult mr = sc.match();
 
-                        if (mr.group(3) == null)
-                            priority = 0;
-                        else
-                            priority = Integer.parseInt(mr.group(3));
-
-                        if ("BEGIN".equals(mr.group(1)))
-                        {
-                            getLog().info(String.format("Starting capture to %s, priority %d", mr.group(2), priority));
-                        }
-                        else if ("END".equals(mr.group(1)))
-                        {
-                            getLog().info(String.format("Ending capture to %s, priority %d", mr.group(2), priority));
-                        }
-                        else
-                        {
-                            getLog().warn("Unknown token \"" + mr.group(1) + "\"");
-                        }
+                        tracker.processToken(mr);
                     }
+
                     line = sc.nextLine();
+
+                    if (!ignore)
+                        tracker.addLine(line);
                 }
                 sc.close();
+                tracker.reset();
             }
             catch (FileNotFoundException e)
             {
                 getLog().warn(e);
             }
         }
+
+        tracker.logOutput();
+
+        /*
+        File dest = destDirectory;
+
+        if (!f.exists())
+        {
+            f.mkdirs();
+        }
+        */
 
         /*
         File touch = new File( f, "touch.txt" );
@@ -146,5 +139,107 @@ public class SnippetExtractorMojo extends AbstractMojo
             }
         }
         */
+    }
+
+    private class OutputTracker
+    {
+        private HashMap<String, LinkedList<String>> files;
+        private LinkedList<String> curfiles;
+
+        public OutputTracker()
+        {
+            files = new HashMap<String, LinkedList<String>>();
+            curfiles = new LinkedList<String>();
+        }
+
+        public void addLine(String line)
+        {
+            for (String file : curfiles)
+            {
+                files.get(file).add(line);
+            }
+        }
+
+        public void startCapture(String filename, int priority)
+        {
+            if (curfiles.contains(filename))
+            {
+                getLog().warn(String.format("already capturing to %s", filename));
+            }
+            else
+            {
+                getLog().debug(String.format("starting capture to %s, priority %d", filename, priority));
+                curfiles.add(filename);
+                if (!files.containsKey(filename))
+                    files.put(filename, new LinkedList<String>());
+            }
+        }
+
+        public void startCapture(String filename, String priority)
+        {
+            if (priority == null)
+                startCapture(filename, 0);
+            else
+                startCapture(filename, Integer.parseInt(priority));
+        }
+
+        public void endCapture(String filename)
+        {
+            if (curfiles.remove(filename))
+            {
+                getLog().debug(String.format("ended capture to %s", filename));
+            }
+            else
+            {
+                getLog().warn(String.format("invalid end token: not capturing to %s", filename));
+            }
+        }
+
+        public void endCapture(String filename, String priority)
+        {
+            if (priority == null)
+                endCapture(filename);
+            else
+            {
+                endCapture(filename);
+                getLog().warn("extraneous priority on END token");
+            }
+        }
+
+        public void processToken(MatchResult mr)
+        {
+            if ("BEGIN".equals(mr.group(1)))
+            {
+                startCapture(mr.group(2), mr.group(3));
+            }
+            else if ("END".equals(mr.group(1)))
+            {
+                endCapture(mr.group(2), mr.group(3));
+            }
+            else
+            {
+                getLog().warn("Unknown token \"" + mr.group(1) + "\"");
+            }
+        }
+
+        public void reset()
+        {
+            if (!curfiles.isEmpty())
+            {
+                for (String file : curfiles)
+                    getLog().warn(String.format("unclosed capture: %s", file));
+                curfiles.clear();
+            }
+        }
+
+        public void logOutput()
+        {
+            for (String file : files.keySet())
+            {
+                getLog().info(String.format("----- %s -----", file));
+                for (String line : files.get(file))
+                    getLog().info(line);
+            }
+        }
     }
 }
