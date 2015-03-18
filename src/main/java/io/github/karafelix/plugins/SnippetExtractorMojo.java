@@ -7,6 +7,7 @@ import org.apache.maven.plugin.MojoFailureException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Scanner;
@@ -99,46 +100,15 @@ public class SnippetExtractorMojo extends AbstractMojo
             }
         }
 
-        tracker.logOutput();
-
-        /*
         File dest = destDirectory;
 
-        if (!f.exists())
+        if (!dest.exists())
         {
-            f.mkdirs();
+            getLog().debug(String.format("Creating directory %s", dest));
+            dest.mkdirs();
         }
-        */
 
-        /*
-        File touch = new File( f, "touch.txt" );
-
-        FileWriter w = null;
-        try
-        {
-            w = new FileWriter( touch );
-
-            w.write( "touch.txt" );
-        }
-        catch ( IOException e )
-        {
-            throw new MojoExecutionException( "Error creating file " + touch, e );
-        }
-        finally
-        {
-            if ( w != null )
-            {
-                try
-                {
-                    w.close();
-                }
-                catch ( IOException e )
-                {
-                    // ignore
-                }
-            }
-        }
-        */
+        tracker.writeOutputs(dest);
     }
 
     private class OutputTracker
@@ -232,13 +202,21 @@ public class SnippetExtractorMojo extends AbstractMojo
             }
         }
 
-        public void logOutput()
+        public void writeOutputs(File dir)
         {
-            for (String file : files.keySet())
+            for (String filename : files.keySet())
             {
-                getLog().info(String.format("----- %s -----", file));
-                for (String line : files.get(file))
-                    getLog().info(line);
+                File file = new File(dir, filename);
+                try (PrintWriter pw = new PrintWriter(file))
+                {
+                    getLog().debug(String.format("writing output to %s", filename));
+                    for (String line : files.get(filename))
+                        pw.println(line);
+                }
+                catch (IOException e)
+                {
+                    getLog().error(e);
+                }
             }
         }
     }
