@@ -21,6 +21,7 @@ public class SnippetExtractorMojo extends AbstractMojo
      * Directory in which to search for snippets.
      * @parameter
      *      alias="src"
+     *      expression="${extract.source}"
      *      default-value="${project.build.sourceDirectory}"
      */
     private File srcDirectory;
@@ -29,6 +30,7 @@ public class SnippetExtractorMojo extends AbstractMojo
      * Directory in which to place generated snippets.
      * @parameter
      *      alias="dest"
+     *      expression="${extract.destination}"
      *      default-value="${project.build.directory}"
      */
     private File destDirectory;
